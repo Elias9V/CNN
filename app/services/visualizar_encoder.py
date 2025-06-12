@@ -7,7 +7,7 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 OUTPUT_DIR = "data/outputs"
-OUTPUT_PATH = os.path.join(OUTPUT_DIR, "salida_encoder.pt")
+OUTPUT_PATH = os.path.join(OUTPUT_DIR, "salida_encoder_1.pt")
 
 def diagnosticar_tensor(tensor: torch.Tensor):
     """
