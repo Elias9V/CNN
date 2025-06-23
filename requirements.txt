@@ -1,9 +1,23 @@
+# ─── Web API ─────────────────────────────────────────────
 fastapi
 uvicorn[standard]
 requests
 python-dotenv
-torch
+
+# ─── Deep Learning & Visión ──────────────────────────────
+torch              # PyTorch
 torchvision
 matplotlib
+numpy<2 
+scikit-image       # morphology, measure
+opencv-python      # Canny, operaciones rápidas (opcional)
+scikit-learn
+
+# ─── Datos geoespaciales / raster ────────────────────────
 rasterio
-numpy
+
+# ─── Análisis tabular ────────────────────────────────────
+pandas
+
+# ─── GIS export (solo si quieres shapefile/GeoJSON) ─────
+geopandas          # <- opcional; instala GDAL y fiona
