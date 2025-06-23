@@ -18,9 +18,23 @@ def run_pipeline() -> dict:
         raise FileNotFoundError(f"No se encontró el archivo de entrada: {input_path}")
     x_input = torch.load(input_path).to(device)  # (B, 10, 128, 128)
 
-    # 2. Ejecutar Encoder
+    # 2. Cargar modelos y pesos entrenados
     encoder = EncoderCNN().to(device)
+    decoder = DecoderLSTM(feature_dim=128).to(device)
+
+    model_path = "data/models/best_model.pth"
+    if not os.path.exists(model_path):
+        raise FileNotFoundError("❌ No se encontró el modelo entrenado best_model.pth")
+
+    checkpoint = torch.load(model_path, map_location=device)
+    encoder.load_state_dict(checkpoint["encoder"])
+    decoder.load_state_dict(checkpoint["decoder"])
+
     encoder.eval()
+    decoder.eval()
+    logger.info("🧠 Pesos del modelo cargados correctamente")
+
+    # 3. Ejecutar Encoder
     with torch.no_grad():
         encoded = encoder(x_input)  # (B, 128, 32, 32)
     logger.info(f"🧠 Salida del encoder: {encoded.shape}")
@@ -29,13 +43,11 @@ def run_pipeline() -> dict:
     os.makedirs(os.path.dirname(encoder_path), exist_ok=True)
     torch.save(encoded, encoder_path)
 
-    # 3. Preparar secuencia para LSTM
+    # 4. Preparar secuencia para LSTM
     B, C, H, W = encoded.shape
-    x_seq = encoded.permute(0, 2, 3, 1).reshape(B, H * W, C)
+    x_seq = encoded.permute(0, 2, 3, 1).reshape(B, H * W, C)  # (B, 1024, 128)
 
-    # 4. Ejecutar Decoder
-    decoder = DecoderLSTM(feature_dim=128).to(device)
-    decoder.eval()
+    # 5. Ejecutar Decoder
     with torch.no_grad():
         raw_output = decoder(x_seq)  # (B, 2, 128, 128)
         output = F.softmax(raw_output, dim=1)
@@ -52,7 +64,7 @@ def run_pipeline() -> dict:
     os.makedirs(os.path.dirname(decoder_path), exist_ok=True)
     torch.save(output, decoder_path)
 
-    # 5. Visualizar clase 1 (riesgo) - solo imagen 0
+    # 6. Visualizar clase 1 (riesgo) - solo imagen 0
     pred_class_1 = output[:, 1, :, :][0].detach().cpu().numpy()
     logger.info(f"📊 Mínimo: {pred_class_1.min()}, Máximo: {pred_class_1.max()}")
     logger.info(f"🔍 Valores únicos: {torch.unique(output).shape[0]} aproximadamente")
@@ -67,6 +79,7 @@ def run_pipeline() -> dict:
     logger.info(f"🖼️ Imagen guardada: {output_img_path}")
 
     return {
+        "message": "Pipeline ejecutado con modelo entrenado",
         "encoder_output": encoder_path,
         "decoder_output": decoder_path,
         "map_image": output_img_path
