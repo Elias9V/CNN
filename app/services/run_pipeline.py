@@ -20,7 +20,13 @@ def run_pipeline() -> dict:
 
     # 2. Cargar modelos y pesos entrenados
     encoder = EncoderCNN().to(device)
-    decoder = DecoderLSTM(feature_dim=128).to(device)
+
+    # Calcular feature_dim automáticamente usando un parche de prueba
+    with torch.no_grad():
+        sample_out, _ = encoder(torch.zeros(1, 1, 128, 128, device=device))
+        feature_dim = sample_out.view(1, -1).shape[-1]
+
+    decoder = DecoderLSTM(feature_dim=feature_dim).to(device)
 
     model_path = "data/models/best_model.pth"
     if not os.path.exists(model_path):
@@ -34,22 +40,26 @@ def run_pipeline() -> dict:
     decoder.eval()
     logger.info("🧠 Pesos del modelo cargados correctamente")
 
-    # 3. Ejecutar Encoder
+    # 3. Ejecutar Encoder sobre cada paso temporal
+    B, T, H, W = x_input.shape
+    feature_seq = []
     with torch.no_grad():
-        encoded = encoder(x_input)  # (B, 128, 32, 32)
-    logger.info(f"🧠 Salida del encoder: {encoded.shape}")
+        for t in range(T):
+            xt = x_input[:, t].unsqueeze(1)  # (B,1,H,W)
+            ft, _ = encoder(xt)
+            ft = ft.view(ft.size(0), -1)
+            feature_seq.append(ft)
+
+    feature_seq_tensor = torch.stack(feature_seq, dim=1)  # (B,T,F)
+    logger.info(f"🧠 Secuencia de características: {feature_seq_tensor.shape}")
 
     encoder_path = "data/outputs/encoder/salida_encoder.pt"
     os.makedirs(os.path.dirname(encoder_path), exist_ok=True)
-    torch.save(encoded, encoder_path)
+    torch.save(feature_seq_tensor, encoder_path)
 
-    # 4. Preparar secuencia para LSTM
-    B, C, H, W = encoded.shape
-    x_seq = encoded.permute(0, 2, 3, 1).reshape(B, H * W, C)  # (B, 1024, 128)
-
-    # 5. Ejecutar Decoder
+    # 4. Ejecutar Decoder
     with torch.no_grad():
-        raw_output = decoder(x_seq)  # (B, 2, 128, 128)
+        raw_output = decoder(feature_seq_tensor, output_size=(H, W))  # (B, 2, H, W)
         output = F.softmax(raw_output, dim=1)
 
     logger.info(f"✅ Salida del decoder: {output.shape}")

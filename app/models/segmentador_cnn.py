@@ -15,5 +15,5 @@ class SegmentadorCNN(nn.Module):
         )
 
     def forward(self, x):
-        encoded = self.encoder(x)  # (B,128,32,32)
+        encoded, _ = self.encoder(x)  # (B,128,32,32)
         return self.decoder(encoded)  # (B,1,128,128)
