@@ -29,7 +29,7 @@ class MFF_MSCA(nn.Module):
         return fused * weights
 
 class EncoderCNN(nn.Module):
-    def __init__(self, in_channels=1):
+    def __init__(self, in_channels=10):
         super(EncoderCNN, self).__init__()
 
         self.conv1 = ConvBlock(in_channels, 32, pooling=False)
@@ -38,43 +38,43 @@ class EncoderCNN(nn.Module):
         self.conv4 = ConvBlock(64, 64, pooling=True)
         self.conv5 = ConvBlock(64, 128, pooling=False)
 
-        # Fusión multiescala
-        self.mff_msca1 = MFF_MSCA(98)   # 1 (x_64) + 32 (out2) + 64 (out3) + 1 (x_avg_64)
-        self.mff_msca2 = MFF_MSCA(257)  # 1 (x_32) + 128 (out5) + 128 (fused_64)
+        # Rama adicional: AvgPool desde x original (128→64)
+        self.avgpool128_64 = nn.AvgPool2d(2)
+
+        # Recalculamos los canales de entrada para la fusión MFF_MSCA (por el nuevo concat)
+        self.mff_msca1 = MFF_MSCA(10 + 32 + 64 + in_channels)  # +10 por avgpool(x)
+        self.mff_msca2 = MFF_MSCA(10 + 128 + 128)
 
         self.conv_final1 = ConvBlock(128, 128, pooling=False)
         self.conv_final2 = ConvBlock(128, 128, pooling=False)
-        self.final_mff_msca = MFF_MSCA(384)  # 128 + 128 + 128
+        self.final_mff_msca = MFF_MSCA(128 + 128 + 128)
 
     def forward(self, x):
-        # Escalado proporcional que se adapta a cualquier tamaño
-        x_64 = F.interpolate(x, scale_factor=0.5, mode='bilinear', align_corners=False)
-        x_32 = F.interpolate(x, scale_factor=0.25, mode='bilinear', align_corners=False)
-        x_avg_64 = F.avg_pool2d(x, kernel_size=2, stride=2)
+        # Preparar resoluciones
+        x_64 = F.interpolate(x, size=(64, 64), mode='bilinear')
+        x_32 = F.interpolate(x, size=(32, 32), mode='bilinear')
+        x_avg_64 = self.avgpool128_64(x)  # ← NUEVO camino verde
 
-        # Forward CNN
-        out1 = self.conv1(x)     # (B, 32, H, W)
-        out2 = self.conv2(out1)  # (B, 32, H/2, W/2)
-        out3 = self.conv3(out2)  # (B, 64, H/2, W/2)
-        out4 = self.conv4(out3)  # (B, 64, H/4, W/4)
-        out5 = self.conv5(out4)  # (B, 128, H/4, W/4)
+        # Forward normal
+        out1 = self.conv1(x)     # (B,32,128,128)
+        out2 = self.conv2(out1)  # (B,32,64,64)
+        out3 = self.conv3(out2)  # (B,64,64,64)
+        out4 = self.conv4(out3)  # (B,64,32,32)
+        out5 = self.conv5(out4)  # (B,128,32,32)
 
-        # Fusión 64x64
-        x_64 = F.interpolate(x_64, size=out2.shape[-2:], mode='bilinear', align_corners=False)
-        x_avg_64 = F.interpolate(x_avg_64, size=out2.shape[-2:], mode='bilinear', align_corners=False)
-        branch_64 = torch.cat([x_64, out2, out3, x_avg_64], dim=1)
+        # Fusión multiescala en 64x64, ahora con rama verde
+        branch_64 = torch.cat([x_64, out2, out3, x_avg_64], dim=1)  # ← rama adicional
         fused_64 = self.mff_msca1(branch_64)
 
-        # Fusión 32x32
-        x_32 = F.interpolate(x_32, size=out5.shape[-2:], mode='bilinear', align_corners=False)
-        fused_64_32 = F.interpolate(fused_64, size=out5.shape[-2:], mode='bilinear', align_corners=False)
-        branch_32 = torch.cat([x_32, out5, fused_64_32], dim=1)
+        # Fusión en 32x32
+        branch_32 = torch.cat([x_32, out5, F.interpolate(fused_64, size=(32, 32))], dim=1)
         fused_32 = self.mff_msca2(branch_32)
 
         # Refinamiento
         out6 = self.conv_final1(fused_32)
         out7 = self.conv_final2(out6)
+
         final = torch.cat([fused_32, out6, out7], dim=1)
         encoded = self.final_mff_msca(final)
 
-        return encoded, x.shape[-2:]
+        return encoded
